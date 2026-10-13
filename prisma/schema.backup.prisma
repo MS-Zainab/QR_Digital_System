@@ -1,0 +1,224 @@
+// Prisma schema for QR Digital Loyalty System
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum BusinessType {
+  cafe
+  restaurant
+  salon
+  retail
+}
+
+enum SubscriptionStatus {
+  PENDING_APPROVAL
+  TRIAL
+  ACTIVE
+  EXPIRED
+  BLOCKED
+  CANCELLED
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+}
+
+enum NotificationType {
+  TRIAL_WARNING
+  TRIAL_EXPIRED
+  SUBSCRIPTION_EXPIRING
+  SUBSCRIPTION_EXPIRED
+  ADMIN_MESSAGE
+  PRICE_CHANGED
+}
+
+// ─────────────────────────────────────────────
+// MODELS
+// ─────────────────────────────────────────────
+
+model Merchant {
+  id                String             @id @default(uuid())
+  name              String
+  slug              String?            @unique
+  businessType      BusinessType
+  logoUrl           String?
+  primaryColor      String             @default("#6366f1")
+  stampsRequired    Int                @default(10)
+  rewardDescription String
+  staffPinHash      String
+  qrSecret          String             @unique @default(uuid())
+  createdAt         DateTime           @default(now())
+
+  // Auth
+  email             String             @unique
+  passwordHash      String
+  staffEmails       String[]           @default([])
+
+  // Subscription
+  subscriptionStatus   SubscriptionStatus @default(TRIAL)
+  trialStartedAt       DateTime           @default(now())
+  trialEndsAt          DateTime
+  currentPeriodEndsAt  DateTime?
+  customPricePerMonth  Int?
+  subscriptionNotes    String?
+
+  // Relations
+  cards                CustomerCard[]
+  scans                ScanLog[]
+  stampRequests        StampRequest[]
+  notifications        Notification[]
+  subscriptionHistory  SubscriptionHistory[]
+  redemptions          RedeemedReward[]
+  consents             CustomerMerchantConsent[]
+
+  @@index([businessType])
+}
+
+model Customer {
+  id                String    @id @default(uuid())
+  phoneNumber       String    @unique
+  name              String?
+  marketingConsent  Boolean   @default(false)
+  consentGivenAt    DateTime?
+  createdAt         DateTime  @default(now())
+
+  cards         CustomerCard[]
+  scans         ScanLog[]
+  stampRequests StampRequest[]
+  redemptions   RedeemedReward[]
+  consents      CustomerMerchantConsent[]
+}
+
+model CustomerMerchantConsent {
+  id          String    @id @default(uuid())
+  customerId  String
+  merchantId  String
+  consented   Boolean   @default(false)
+  consentedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  merchant    Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, merchantId])
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([merchantId, consented])
+}
+
+model CustomerCard {
+  id          String   @id @default(uuid())
+  customerId  String
+  merchantId  String
+  stampCount  Int      @default(0)
+  isRedeemed  Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  merchant    Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  redemptions RedeemedReward[]
+
+  @@unique([customerId, merchantId])
+  @@index([merchantId])
+  @@index([customerId])
+}
+
+model ScanLog {
+  id         String   @id @default(uuid())
+  customerId String
+  merchantId String
+  pinUsed    String   @default("APPROVED")
+  scannedAt  DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([scannedAt])
+}
+
+model StampRequest {
+  id          String        @id @default(uuid())
+  customerId  String
+  merchantId  String
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  expiresAt   DateTime
+  respondedAt DateTime?
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, status])
+  @@index([customerId, merchantId, createdAt])
+  @@index([expiresAt])
+}
+
+model Notification {
+  id          String           @id @default(uuid())
+  merchantId  String
+  type        NotificationType
+  title       String
+  message     String
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, read])
+}
+
+model SubscriptionHistory {
+  id          String   @id @default(uuid())
+  merchantId  String
+  action      String
+  daysAdded   Int?
+  amountPaid  Int?
+  performedBy String
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+  @@index([createdAt])
+}
+
+model PlatformSettings {
+  id         String   @id @default("global")
+  signupMode String   @default("AUTO")
+  updatedAt  DateTime @updatedAt
+}
+
+model RedeemedReward {
+  id          String   @id @default(uuid())
+  cardId      String
+  customerId  String
+  merchantId  String
+  rewardText  String
+  redeemedAt  DateTime @default(now())
+  notes       String?
+
+  card        CustomerCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  merchant    Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([redeemedAt])
+}
